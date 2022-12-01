@@ -1,0 +1,211 @@
+##########################################################################
+			PROCESSING DATASETS
+##########################################################################
+
+#Step A: Coelution data 
+	sh coelution-prepare_data.sh 
+
+	# Calculate scores from coelution for all experiments
+
+	# Main scores - PCCNM(pearson cross correlation with noise modelling), WCC(weighted cross correlation), COAPEX, MI(mutual information)
+	# separately for all experiments
+	# combined matrices
+
+	#Derived scores - TOMSIM-PCCNM, TOMSIM-WCC, CLR-PCCNM, CLR-WCC, CLR-MI
+	
+
+	#1a: PCCNM scores - to be run on scinet / hpf - time-consuming (~48 hrs) with split files as output
+
+	sh generate_pccnm_subset_scripts_hcf.sh
+
+	#1b: Combine split PCCNM output files into
+
+	sh coelution-pccnm_combine.sh
+
+	#2: Generate WCC scores
+
+	sh coelution-wcc.sh
+
+	#3: Generate set of all pairs / and pairs with pccnm_cn (or) wcc > 0.5 - this will form the set for coapex as well as form the test dataset
+
+	sh coelution-subset_pairs.sh (few mins)
+
+	#4: Generate coapex scores
+
+	sh coelution-coapex.sh
+
+	#5: Generate MI scores
+	
+	sh coelution-mi.sh	(few days)
+
+	#6: Generate derived scores
+
+	sh coelution-tomsim_pccnm.sh	(~ 10 mins)
+	sh coelution-tomsim_wcc.sh	(~ 11 mins)
+	
+	sh coelution-clr_pccnm.sh	(~ 6 mins)
+	sh coelution-clr_wcc.sh		(~ 5 mins)
+	sh coelution-clr_mi.sh		(~ 5 mins)	**Done till here**
+
+	**(Likely problem for tomsim_pccnm and clr_pccnm with pccnm_rn_all_beads_cleaned_mF1.tab,pccnm_rn_all_beads_cleaned_mF1)**
+
+#Step B: Coexpression data
+
+	#1. Generate coexpression matrix from normalized datasets  
+	
+	(NOTE: THIS NEEDS TO BE TWEAKED TO FIT INTO PIPELINE)
+	sh coexpression-construct_matrix_non-ts.sh 
+
+	#2: Generate coexpression scores - pearson, spearman, mi - and their CLR-derived version
+
+	sh coexpression-scores.sh	(~ 1 hr)
+
+#Step C: Phylogenetic profiles
+
+	#1. Generate matrix of phylogenetic profiles based on presence / absence information
+
+        (NOTE: THIS NEEDS TO BE TWEAKED TO FIT INTO PIPELINE)
+	python phylogenetic_profiles-pres_abs.py	
+
+	#2. Generate matrix of phylogenetic profiles based on pij values
+
+        (NOTE: THIS NEEDS TO BE TWEAKED TO FIT INTO PIPELINE)
+        python phylogenetic_profiles-pij.py
+
+	#3. Calculate MI and CLR-MI values for these profiles
+
+	sh phylogenetic_profiles-scores.sh	(~4 hrs)
+
+
+#Step D: Domain-domain interactions
+
+	#1. Generate Pfam domain associations for all sequences
+
+	(Would need to be tweaked for something else) - These are _std codes for now
+
+	#2. Associate this information with domain-domain interactions	
+
+	(May need to be tweaked with respect to other files)	(~ 3 mins)
+	perl ddi-protein_pairs_likelihood_scores.pl ../data/dom_dom_interactions/raw_data/proteins_domains.csv ../data/id_mapping/overall_id_mapping.csv ../data/dom_dom_interactions/raw_data/Lee_dataset_addnfile-s7.txt ../data/dom_dom_interactions/scores/
+
+
+#Step E: Scores from STRING
+
+	#1. Extract scores for "gene fusion", "text mining" and "experiments" from STRING database for the organism of interest 
+
+	sh string_scores.sh	(~30 mins)
+
+
+#######################################################
+		FEATURE SELECTION
+#######################################################
+
+#Step A: Generate a table of all-vs-all coelution pairs and their scores for all features
+
+	*** Generate a list containing all the scores to be integrated - manually ***
+	Store it in allscores_mF2.lst
+
+	sh integrate_datasets-copy.sh allscores_mF2.lst
+
+	sh integrate_datasets-profiles.sh  (~42 mins)
+
+
+#Step B: Generate a table of all-vs-all correlations for the features
+
+	Rscript all_vs_all_correlations.R ../data/integrated_datasets_allscores_mF2_profiles_NA-\?-to-0.csv ../data/all_vs_all_correlations_mF2_profiles.csv
+	sed 's/,/\t/g' ../data/all_vs_all_correlations_mF2_profiles.csv > ../data/all_vs_all_correlations_mF2_profiles.tab
+	cluster3 -g 2 -e 2 -m a -f ../data/all_vs_all_correlations_mF2_profiles.tab
+
+
+#Step C: Extract feature table for training data
+
+        #Manually generate files containing lists of these columns
+
+        data/sets_column_normalized
+             sets_raw_counts
+             sets_row_normalized
+             sets_column_normalized_mF1_profiles_NA-?-to-0.csv
+             sets_raw_counts_mF1_profiles_NA-?-to-0.csv
+             sets_row_normalized_mF1_profiles_NA-?-to-0.csv
+
+        #Create profiles of these extracted columns
+
+        sh integrate_datasets-extract_specific_columns.sh
+
+#Step D: Feature selection
+
+
+#Step E: Consider sets of
+	PCCNM, WCC, MI	(or)	PCCNM-TOMSIM, WCC-TOMSIM, CLR-MI	(or) 	PCCNM-CLR, WCC-CLR, MI-CLR
+	Coapex / WCC ??
+
+	PIJ-MI, PA-MI	(or) PIJ-MI-CLR, PA-MI-CLR
+
+	COEXPR-PCC (or) COEXPR-SPEARMAN (or) COEXPR-MI (or) COEXPR-PCC-CLR (or) COEXPR-SPEARMAN (or) COEXPR-MI-CLR
+
+	DDI-LLS
+
+	STRING-HC  (or) STRING-MC	(or) STRING-GF, STRING-TM	(or) STRING-ALL	
+
+########################################################
+		GENERATING A TRAINING DATASET
+
+#STEP F: From the list already generated for training sets.. extract those found in combos_with_pcc_or_wcc_ge0.5 
+	perl coelution-pairs_with_pcc_or_wcc_ge0.5.pl 
+	Results stored in data/ folder
+
+	combos_with_pcc_or_wcc_ge0.5_mF1_cn.csv
+	combos_with_pcc_or_wcc_ge0.5_mF1_raw_counts.csv
+	combos_with_pcc_or_wcc_ge0.5_mF1_rn.csv
+	combos_with_pcc_or_wcc_ge0.5_mF2_cn.csv
+	combos_with_pcc_or_wcc_ge0.5_mF2_raw_counts.csv
+	combos_with_pcc_or_wcc_ge0.5_mF2_rn.csv 
+
+	#Generating training_data for cleaned sets
+
+	sh training_data.sh
+	sh training_data-combos_with_pcc_or_wcc_ge0.5.sh
+
+	*** Note - for some reason the numbers with the combos_pcc_or_wcc are much lower than they are with the orig_pair - so considering that also (training_NEGGO_orig) 1:3 ***
+########################################################
+		GENERATING A TEST DATASET
+########################################################
+#Step A: Generating a set with 0.5 PCCNM_CN/_RN / WCC in all sets
+
+	#Generating profiles for training and test sets
+
+	sh training_test-profiles.sh
+
+	#There are differences in the test profiles (with respect to original NEGGO version)
+
+	174448 test_NEGGO_orig.csv
+	179630 test_rn version
+
+	Of these, 113 are unique to test_NEGGO_orig.csv and 5295 unique to test_rn
+
+	Creating a subset 174335 of test profiles based on test_NEGGO_orig_overlap supervised-corrections_arff_files.sh
+	
+		
+########################################################
+		SUPERVISED LEARNING
+########################################################
+
+#Step A: using weka
+	
+	Converted the .csv files of the test_data/profiles*csv into arff files using the arff viewer in weka
+	Made regular conversions using the script supervised-corrections_arff_files.sh
+	!!! For some reason, the training files .arff version is not correct for the attributes - fixed it by copy pasting from the correspoinding .arff test file version !!!
+
+#Step B: Testing on test dataset
+
+#Step C: ROC curves - with different sets of features
+
+#Step D: 
+
+########################################################
+		UNSUPERVISED LEARNING
+########################################################
+
+#Step A: What are the best feature sets to use with SNF?
+
+#Step B: Analyse the feature sets with different parameter combinations  
